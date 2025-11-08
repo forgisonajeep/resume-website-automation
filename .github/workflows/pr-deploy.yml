@@ -1,4 +1,4 @@
-name: PR → deploy (beta)
+name: PR -> deploy (beta)
 
 on:
   pull_request:
@@ -25,20 +25,59 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Terraform init + read outputs
-        id: tf
+      - name: Terraform init + plan + validate
         run: |
           cd terraform
           terraform init -input=false
-          terraform output -raw bucket_name > ../bucket.txt
+          terraform fmt -check
+          terraform validate
+          terraform plan -out=tfplan
 
-      - name: Build resume site (markdown → HTML)
+      - name: Terraform apply (auto-approve) (create/update infra)
+        if: github.event_name == 'pull_request'
         run: |
+          cd terraform
+          terraform apply -auto-approve tfplan
+
+      - name: Read terraform outputs (bucket name & website endpoint)
+        id: outputs
+        run: |
+          cd terraform
+          terraform output -raw bucket_name > ../bucket.txt
+          terraform output -raw website_endpoint > ../website_endpoint.txt
+          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
+          terraform output -raw resume_analytics_table > ../ddb_analytics.txt
+
+      - name: Setup Python
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
           pip install -r requirements.txt
+
+      - name: Build resume HTML (local)
+        run: |
+          . .venv/bin/activate
           python src/build_resume_site.py
 
-      - name: Upload to S3 → beta prefix
+      - name: Upload site to S3 (beta)
         run: |
-          BUCKET=$(cat bucket.txt)
-          aws s3 cp dist/index.html s3://$BUCKET/beta/index.html --acl public-read
-          echo "Uploaded resume to beta → s3://$BUCKET/beta/index.html"
+          if [ -f ../bucket.txt ]; then
+            BUCKET=$(cat ../bucket.txt)
+            aws s3 cp dist/index.html s3://$BUCKET/beta/index.html --acl public-read
+            echo "Deployed to beta -> s3://$BUCKET/beta/index.html"
+          else
+            echo "::warning::bucket.txt not found, skipping upload"
+          fi
+
+      - name: Output S3 website endpoint (for screenshots)
+        run: |
+          if [ -f ../website_endpoint.txt ]; then
+            echo "S3 website endpoint: $(cat ../website_endpoint.txt)"
+          else
+            echo "::warning::website_endpoint not found"
+          fi
+
+      - name: Cleanup temp files
+        if: always()
+        run: |
+          rm -f ../bucket.txt ../website_endpoint.txt ../ddb_tracking.txt ../ddb_analytics.txt || true

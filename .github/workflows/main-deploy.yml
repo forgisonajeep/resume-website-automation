@@ -1,4 +1,4 @@
-name: Promote beta → prod
+name: Promote beta -> prod
 
 on:
   push:
@@ -18,15 +18,14 @@ jobs:
         with:
           terraform_version: 1.6.6
 
-      - name: Configure AWS credentials
+      - name: Set up AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Get Terraform outputs
-        id: tf
+      - name: Get Terraform outputs (bucket + tables)
         run: |
           cd terraform
           terraform init -input=false
@@ -37,14 +36,13 @@ jobs:
       - name: Promote beta → prod
         run: |
           BUCKET=$(cat bucket.txt)
-
           echo "Promoting beta → prod in bucket: $BUCKET"
           aws s3 cp \
             s3://$BUCKET/beta/index.html \
             s3://$BUCKET/prod/index.html \
             --acl public-read
 
-      - name: Confirm deployment metadata
+      - name: Confirm deployment metadata (optional)
         run: |
           echo "DeploymentTracking table: $(cat ddb_tracking.txt)"
           echo "ResumeAnalytics table: $(cat ddb_analytics.txt)"
@@ -52,4 +50,5 @@ jobs:
 
       - name: Cleanup temp files
         if: always()
-        run: rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true
+        run: |
+          rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true
