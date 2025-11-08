@@ -3,11 +3,7 @@ output "bucket_name" {
   value       = aws_s3_bucket.resume_bucket.bucket
 }
 
-output "website_endpoint" {
-  description = "Public S3 website endpoint (beta/prod paths must be added)"
-  value       = aws_s3_bucket_website_configuration.resume_bucket.website_endpoint
-}
-
+# optional — only if you declare these tables in main.tf
 output "deployment_tracking_table" {
   description = "DynamoDB DeploymentTracking table"
   value       = aws_dynamodb_table.deployment_tracking.name
