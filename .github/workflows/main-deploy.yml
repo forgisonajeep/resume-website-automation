@@ -13,6 +13,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.6
+
       - name: Set up AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
@@ -32,18 +37,15 @@ jobs:
       - name: Promote beta → prod
         run: |
           BUCKET=$(cat bucket.txt)
-          echo "Promoting: $BUCKET"
+          echo "Promoting beta → prod in bucket: $BUCKET"
 
           aws s3 cp \
             s3://$BUCKET/beta/index.html \
             s3://$BUCKET/prod/index.html \
             --acl public-read
 
-      - name: Confirm deployment metadata (DynamoDB optional)
+      - name: Confirm deployment metadata (optional)
         run: |
-          echo "Would write to DynamoDB here (optional integration step)"
-          echo "Tracking table: $(cat ddb_tracking.txt)"
-          echo "Analytics table: $(cat ddb_analytics.txt)"
-
-      - name: Done
-        run: echo "✅ Production site promoted successfully!"
+          echo "DeploymentTracking table: $(cat ddb_tracking.txt)"
+          echo "ResumeAnalytics table: $(cat ddb_analytics.txt)"
+          echo "Deployment promoted"
