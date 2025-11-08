@@ -2,25 +2,21 @@ name: PR → deploy (beta)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-
-env:
-  # Optional default region (you can override by setting AWS_REGION secret)
-  AWS_REGION: ${{ secrets.AWS_REGION }}
+    branches:
+      - main
 
 jobs:
   deploy:
-    name: Deploy to beta (PR)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
         with:
-          fetch-depth: 0
+          terraform_version: 1.6.6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -29,81 +25,20 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: "1.5.7" # change if you want a different version
-
-      - name: Terraform init + fmt + validate
-        working-directory: ./terraform
+      - name: Terraform init + read outputs
+        id: tf
         run: |
+          cd terraform
           terraform init -input=false
-          terraform fmt -check || terraform fmt
-          terraform validate
+          terraform output -raw bucket_name > ../bucket.txt
 
-      - name: Terraform plan (save plan)
-        working-directory: ./terraform
+      - name: Build resume site (markdown → HTML)
         run: |
-          terraform plan -out=tfplan -input=false
-
-      - name: Terraform apply (auto-approve)
-        working-directory: ./terraform
-        run: |
-          terraform apply -auto-approve tfplan
-
-      - name: Read terraform outputs (bucket name & website endpoint)
-        working-directory: ./terraform
-        run: |
-          # bucket_name should be an output in your terraform
-          echo "BUCKET=$(terraform output -raw bucket_name)" >> $GITHUB_ENV || echo "No bucket_name output found"
-          echo "WEBSITE_ENDPOINT=$(terraform output -raw bucket_website_endpoint 2>/dev/null || true)" >> $GITHUB_ENV
-          # Print for logs (may contain publicly readable endpoint)
-          echo "Bucket: $BUCKET"
-          echo "Website endpoint: $WEBSITE_ENDPOINT"
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-
-      - name: Install Python requirements
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Build resume HTML (local)
-        # This runs your site build script that converts resume.md -> dist/index.html
-        run: |
-          # adjust the script path if different in your repo
+          pip install -r requirements.txt
           python src/build_resume_site.py
 
-      - name: Upload site to S3 (beta prefix)
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
+      - name: Upload to S3 → beta prefix
         run: |
-          if [ -z "${BUCKET}" ]; then
-            echo "ERROR: BUCKET env var is empty. Make sure terraform output 'bucket_name' exists."
-            exit 1
-          fi
-          # Sync local dist/ to the bucket's beta/ prefix
-          aws s3 sync dist/ "s3://${BUCKET}/beta/" --acl public-read --delete
-          # Show top-level index for debugging
-          aws s3 ls "s3://${BUCKET}/beta/"
-
-      - name: Write deployment metadata to DynamoDB (optional)
-        run: |
-          # If you have a script that writes the DeploymentTracking item and analytics,
-          # call it here. Example:
-          # python src/write_deployment_record.py --env beta --bucket "$BUCKET" --commit ${{ github.sha }}
-          echo "If you have a script to record the deployment to DynamoDB, call it here."
-        # If you DO have a script in the repo that does this, replace the echo with the python invocation.
-
-      - name: Output S3 website endpoint (for screenshots)
-        run: |
-          echo "S3 website endpoint (from terraform output): $WEBSITE_ENDPOINT"
-          if [ -n "$WEBSITE_ENDPOINT" ]; then
-            echo "You can open this URL in a browser to verify the site is live (beta path is /beta/index.html)"
-            echo "::notice::Website endpoint: $WEBSITE_ENDPOINT"
-          else
-            echo "::warning::No website endpoint found in terraform outputs. You can construct it as: http://$BUCKET.s3-website-${{ secrets.AWS_REGION }}.amazonaws.com"
-          fi
+          BUCKET=$(cat bucket.txt)
+          aws s3 cp dist/index.html s3://$BUCKET/beta/index.html --acl public-read
+          echo "Uploaded resume to beta → s3://$BUCKET/beta/index.html"
