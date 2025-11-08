@@ -1,4 +1,4 @@
-name: Deploy to PROD on merge to main
+name: Promote beta → prod
 
 on:
   push:
@@ -8,9 +8,6 @@ on:
 jobs:
   promote:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
       - name: Checkout repository
@@ -23,15 +20,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Promote beta to prod
+      - name: Get Terraform outputs (bucket + tables)
+        id: tf
         run: |
+          cd terraform
+          terraform init -input=false
+          terraform output -raw bucket_name > ../bucket.txt
+          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
+          terraform output -raw resume_analytics_table > ../ddb_analytics.txt
+
+      - name: Promote beta → prod
+        run: |
+          BUCKET=$(cat bucket.txt)
+          echo "Promoting: $BUCKET"
+
           aws s3 cp \
-            s3://$BUCKET_NAME/beta/index.html \
-            s3://$BUCKET_NAME/prod/index.html \
+            s3://$BUCKET/beta/index.html \
+            s3://$BUCKET/prod/index.html \
             --acl public-read
 
-      - name: Record PRODUCTION deployment in DynamoDB (optional)
+      - name: Confirm deployment metadata (DynamoDB optional)
         run: |
-          echo "TODO: Add python script to update DeploymentTracking"
-          # Example:
-          # python src/write_deployment_record.py --env prod --bucket "$BUCKET_NAME" --commit "$GITHUB_SHA"
+          echo "Would write to DynamoDB here (optional integration step)"
+          echo "Tracking table: $(cat ddb_tracking.txt)"
+          echo "Analytics table: $(cat ddb_analytics.txt)"
+
+      - name: Done
+        run: echo "✅ Production site promoted successfully!"

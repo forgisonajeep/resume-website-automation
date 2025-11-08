@@ -1,19 +1,19 @@
 output "bucket_name" {
-  description = "S3 bucket for resume site"
+  description = "S3 bucket name (raw name, not URL)"
   value       = aws_s3_bucket.resume_bucket.bucket
 }
 
-output "bucket_website_endpoint" {
-  description = "Public website endpoint"
-  value       = aws_s3_bucket_website_configuration.resume_site.website_endpoint
+output "website_endpoint" {
+  description = "Public S3 website endpoint (beta/prod paths must be added)"
+  value       = aws_s3_bucket_website_configuration.resume_bucket.website_endpoint
 }
 
 output "deployment_tracking_table" {
-  description = "DynamoDB table for deployments"
+  description = "DynamoDB DeploymentTracking table"
   value       = aws_dynamodb_table.deployment_tracking.name
 }
 
 output "resume_analytics_table" {
-  description = "DynamoDB table for analytics"
+  description = "DynamoDB ResumeAnalytics table"
   value       = aws_dynamodb_table.resume_analytics.name
 }
