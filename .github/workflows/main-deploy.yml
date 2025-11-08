@@ -1,0 +1,37 @@
+name: Deploy to PROD on merge to main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Promote beta to prod
+        run: |
+          aws s3 cp \
+            s3://$BUCKET_NAME/beta/index.html \
+            s3://$BUCKET_NAME/prod/index.html \
+            --acl public-read
+
+      - name: Record PRODUCTION deployment in DynamoDB (optional)
+        run: |
+          echo "TODO: Add python script to update DeploymentTracking"
+          # Example:
+          # python src/write_deployment_record.py --env prod --bucket "$BUCKET_NAME" --commit "$GITHUB_SHA"
