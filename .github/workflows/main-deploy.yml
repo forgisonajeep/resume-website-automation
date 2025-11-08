@@ -7,18 +7,23 @@ on:
 
 jobs:
   promote:
+    name: Promote beta → prod
     runs-on: ubuntu-latest
+    env:
+      # Optional: override if you store region differently
+      AWS_REGION: ${{ secrets.AWS_REGION }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Install terraform binary so we can call terraform output.
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.6.6
 
-      - name: Set up AWS credentials
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -26,26 +31,73 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Get Terraform outputs (bucket + tables)
-        id: tf
+        id: tf_outputs
         run: |
-          cd terraform
+          set -euo pipefail
+
+          # move into terraform directory (adjust if your tf files are somewhere else)
+          if [ -d "terraform" ]; then
+            cd terraform
+          else
+            echo "::error::No terraform directory found at repo root/terraform"
+            exit 1
+          fi
+
+          # initialize only (no apply). This will download providers and enable output reading.
           terraform init -input=false
-          terraform output -raw bucket_name > ../bucket.txt
-          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
-          terraform output -raw resume_analytics_table > ../ddb_analytics.txt
 
-      - name: Promote beta → prod
+          # Read outputs - fail with clear message if an output is missing.
+          if terraform output -json >/dev/null 2>&1; then
+            echo "Detected terraform state/outputs"
+          else
+            echo "::error::terraform output not available. Make sure terraform state exists for this repo and outputs are defined."
+            terraform output || true
+            exit 1
+          fi
+
+          # Read raw outputs into files one per value (used later)
+          terraform output -raw bucket_name > ../bucket.txt || { echo "::error::bucket_name output not found"; exit 1; }
+          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt || echo "warning: deployment_tracking_table output missing" > /dev/null
+          terraform output -raw resume_analytics_table > ../ddb_analytics.txt || echo "warning: resume_analytics_table output missing" > /dev/null
+
+          # expose the bucket name to later steps as an output
+          echo "bucket=$(cat ../bucket.txt)" >> $GITHUB_OUTPUT
+
+      - name: Promote beta → prod (copy object inside same bucket)
         run: |
-          BUCKET=$(cat bucket.txt)
-          echo "Promoting beta → prod in bucket: $BUCKET"
+          set -euo pipefail
 
+          BUCKET="${{ steps.tf_outputs.outputs.bucket }}"
+          echo "Promoting beta → prod in bucket: ${BUCKET}"
+
+          if [ -z "$BUCKET" ]; then
+            echo "::error::Bucket name is empty"
+            exit 1
+          fi
+
+          # check that source object exists
+          if aws s3 ls "s3://${BUCKET}/beta/index.html" >/dev/null 2>&1; then
+            echo "Found s3://${BUCKET}/beta/index.html - copying to prod"
+          else
+            echo "::error::Source object s3://${BUCKET}/beta/index.html not found. Aborting promote."
+            exit 2
+          fi
+
+          # copy object (server-side) - use s3 cp to same bucket; preserve ACL/public-read if desired
           aws s3 cp \
-            s3://$BUCKET/beta/index.html \
-            s3://$BUCKET/prod/index.html \
+            "s3://${BUCKET}/beta/index.html" \
+            "s3://${BUCKET}/prod/index.html" \
             --acl public-read
 
-      - name: Confirm deployment metadata (optional)
+          echo "Promoted beta → prod: s3://${BUCKET}/prod/index.html"
+
+      - name: Confirm deployment metadata (optional; prints terraform outputs)
         run: |
-          echo "DeploymentTracking table: $(cat ddb_tracking.txt)"
-          echo "ResumeAnalytics table: $(cat ddb_analytics.txt)"
-          echo "Deployment promoted"
+          echo "DeploymentTracking table: $(cat ddb_tracking.txt 2>/dev/null || echo 'N/A')"
+          echo "ResumeAnalytics table: $(cat ddb_analytics.txt 2>/dev/null || echo 'N/A')"
+          echo "Promotion complete - beta → prod"
+
+      - name: Cleanup temp files
+        if: always()
+        run: |
+          rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true
