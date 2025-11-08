@@ -1,4 +1,4 @@
-name: Promote beta → prod
+name: Promote beta -> prod
 
 on:
   push:
@@ -26,7 +26,6 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Get Terraform outputs (bucket + tables)
-        id: tf
         run: |
           cd terraform
           terraform init -input=false
@@ -38,7 +37,6 @@ jobs:
         run: |
           BUCKET=$(cat bucket.txt)
           echo "Promoting beta → prod in bucket: $BUCKET"
-
           aws s3 cp \
             s3://$BUCKET/beta/index.html \
             s3://$BUCKET/prod/index.html \
@@ -48,4 +46,9 @@ jobs:
         run: |
           echo "DeploymentTracking table: $(cat ddb_tracking.txt)"
           echo "ResumeAnalytics table: $(cat ddb_analytics.txt)"
-          echo "Deployment promoted"
+          echo "Promotion complete"
+
+      - name: Cleanup temp files
+        if: always()
+        run: |
+          rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true

@@ -1,5 +1,5 @@
 output "bucket_name" {
-  description = "S3 bucket name (raw name, not URL)"
+  description = "S3 bucket name (raw name)"
   value       = aws_s3_bucket.resume_bucket.bucket
 }
 
