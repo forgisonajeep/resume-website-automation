@@ -47,8 +47,8 @@ jobs:
 
       - name: Promote beta -> prod
         run: |
-          BUCKET=$(cat bucket.txt)
-          echo "Uploading PROD site to bucket: $BUCKET"
+          BUCKET=$(terraform -chdir=terraform output -raw bucket_name)
+          echo "PROD site to bucket: $BUCKET"
           aws s3 cp dist/index.html s3://$BUCKET/index.html
 
       - name: Confirm deployment metadata (optional)
