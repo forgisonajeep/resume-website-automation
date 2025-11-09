@@ -43,7 +43,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Build resume HTML (local)
-        run: python build_resume_site.py
+        run: python src/build_resume_site.py
 
       - name: Promote beta -> prod
         run: |
