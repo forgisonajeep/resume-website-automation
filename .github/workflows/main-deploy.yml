@@ -33,14 +33,23 @@ jobs:
           terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
           terraform output -raw resume_analytics_table > ../ddb_analytics.txt
 
-      - name: Promote beta → prod
+      # ------- Promote beta -> prod -------
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build resume HTML (local)
+        run: python build_resume_site.py
+
+      - name: Promote beta -> prod
         run: |
           BUCKET=$(cat bucket.txt)
-          echo "Promoting beta → prod in bucket: $BUCKET"
-          aws s3 cp \
-            s3://$BUCKET/beta/index.html \
-            s3://$BUCKET/prod/index.html \
-            --acl public-read
+          echo "Uploading PROD site to bucket: $BUCKET"
+          aws s3 cp dist/index.html s3://$BUCKET/index.html
 
       - name: Confirm deployment metadata (optional)
         run: |
