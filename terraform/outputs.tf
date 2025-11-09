@@ -12,3 +12,8 @@ output "resume_analytics_table" {
   description = "DynamoDB ResumeAnalytics table"
   value       = aws_dynamodb_table.resume_analytics.name
 }
+
+output "website_endpoint" {
+  description = "S3 static website endpoint (hostname)"
+  value       = aws_s3_bucket.resume_bucket.website_endpoint
+}
