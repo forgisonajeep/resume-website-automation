@@ -96,6 +96,11 @@ jobs:
           echo "PROD site to bucket: $BUCKET"
           aws s3 cp dist/index.html s3://$BUCKET/index.html
 
+      - name: Write deployment event to DynamoDB
+        run: |
+          echo "Writing deployment record to DynamoDB (table from ddb_tracking.txt)"
+          python scripts/write_deployment_event.py
+
       - name: Confirm deployment metadata (optional)
         run: |
           echo "DeploymentTracking table: $(cat ddb_tracking.txt)"
