@@ -31,27 +31,13 @@ jobs:
       - name: Get Terraform outputs (bucket + tables)
         run: |
           cd terraform
-
-          # Initialize terraform (no prompts)
           terraform init -input=false
-
-          # Write raw terraform output (stdout only) to temp files
           terraform output -raw bucket_name  > /tmp/raw_bucket.out 2>/dev/null || true
           terraform output -raw deployment_tracking_table > /tmp/raw_tracking.out 2>/dev/null || true
           terraform output -raw resume_analytics_table    > /tmp/raw_analytics.out 2>/dev/null || true
-
           cd ..
 
-          echo "----- RAW bucket output (visible) -----"
-          sed -n '1,10p' /tmp/raw_bucket.out || true
-          echo "---------------------------------------"
-
-          # --- STRICT CLEANING LOGIC ---
-          # Try to extract ONLY bucket-like tokens:
-          #  valid S3 bucket characters (a-z, 0-9, hyphen, dot)
-          #  MUST contain a hyphen (prevents matching words like 'exitcode')
-          #  ignore common debug garbage (stdout, stderr, exitcode, debug, etc)
-
+          # Strict cleaning for bucket and safe last-line capture for tables
           CLEAN_BUCKET=$(
             sed 's/\r$//' /tmp/raw_bucket.out \
             | grep -Eo '[a-z0-9][a-z0-9.-]{2,62}' \
@@ -59,8 +45,6 @@ jobs:
             | grep -Ev '^(stdout|stderr|exitcode|debug|::debug::|::group::|::endgroup::)$' \
             | tail -n1 || true
           )
-
-          # Fallback: last non-empty line, then reject if it equals known noise
           if [ -z "$CLEAN_BUCKET" ]; then
             CLEAN_BUCKET=$(sed 's/\r$//' /tmp/raw_bucket.out | sed -n '/./p' | tail -n1 || true)
             case "$CLEAN_BUCKET" in
@@ -68,7 +52,6 @@ jobs:
             esac
           fi
 
-          # Save cleaned bucket + tables for next steps
           printf "%s\n" "$CLEAN_BUCKET" > bucket.txt
           printf "%s\n" "$(sed -n '/./p' /tmp/raw_tracking.out | tail -n1)" > ddb_tracking.txt
           printf "%s\n" "$(sed -n '/./p' /tmp/raw_analytics.out | tail -n1)" > ddb_analytics.txt
@@ -77,7 +60,6 @@ jobs:
           echo "bucket.txt contains:"
           cat bucket.txt
 
-      # ------- Promote beta -> prod -------
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -98,10 +80,8 @@ jobs:
 
       - name: Fix bucket value (strict clean)
         run: |
-          # take last non-empty line, strip CR/whitespace, then remove anything not allowed in S3 bucket name
           LAST_LINE=$(awk 'NF{line=$0}END{print line}' bucket.txt || true)
           CLEAN=$(printf "%s" "$LAST_LINE" | tr -d '\r\n[:space:]' | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9.-]//g')
-          # fallback if CLEAN is empty
           if [ -z "$CLEAN" ]; then
             echo "ERROR: cleaned bucket name is empty; showing original file for debugging"
             nl -ba bucket.txt
@@ -122,7 +102,32 @@ jobs:
           echo "ResumeAnalytics table: $(cat ddb_analytics.txt)"
           echo "Promotion complete"
 
+      # ---------- NEW: record deployment to DynamoDB ----------
+      - name: Record deployment event to DynamoDB
+        id: record_ddb
+        run: |
+          # env label: you can set to "prod" (or "beta" if promoting beta)
+          ENVIRONMENT="prod"
+          python scripts/write_deployment_event.py \
+            --table-file ddb_tracking.txt \
+            --bucket-file bucket.txt \
+            --environment "$ENVIRONMENT" \
+            --region "${{ secrets.AWS_REGION }}" || true
+        # do not fail the whole job for non-critical telemetry errors; remove "|| true" if you want it to fail
+
       - name: Cleanup temp files
         if: always()
         run: |
           rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true
+
+      - name: Post Setup Python
+        run: echo "Post setup"
+
+      - name: Post Set up AWS credentials
+        run: echo "Post AWS creds"
+
+      - name: Post Checkout repository
+        run: echo "Post checkout"
+
+      - name: Complete job
+        run: echo "Done"
