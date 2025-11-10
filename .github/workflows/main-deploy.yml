@@ -47,9 +47,25 @@ jobs:
 
       - name: Promote beta -> prod
         run: |
-          BUCKET=$(cat bucket.txt)
-          echo "PROD site to bucket: $BUCKET"
-          aws s3 cp dist/index.html s3://$BUCKET/index.html
+          echo "PWD: $(pwd)"
+          echo "--- repo listing ---"
+          ls -la
+
+          echo "--- bucket.txt raw (visible markers) ---"
+          printf '<<START>>\n'
+          sed -n '1,200p' bucket.txt
+          printf '\n<<END>>\n'
+
+          # Trim whitespace/newlines and CR
+          BUCKET=$(cat bucket.txt | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          echo "BUCKET after trim: <<$BUCKET>>"
+
+          # final sanity check: show length and chars
+          echo "bucket length: ${#BUCKET}"
+          echo "bucket chars: $(echo "$BUCKET" | sed -n '1,200p')"
+
+          # upload (debug mode so if it fails we get detail)
+          aws s3 cp dist/index.html s3://$BUCKET/index.html --debug
 
       - name: Confirm deployment metadata (optional)
         run: |
