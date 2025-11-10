@@ -26,8 +26,8 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Get Terraform outputs (bucket + tables)
+        working-directory: terraform
         run: |
-          cd terraform
           terraform init -input=false
           terraform output -raw bucket_name > ../bucket.txt
           terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
@@ -47,25 +47,9 @@ jobs:
 
       - name: Promote beta -> prod
         run: |
-          echo "PWD: $(pwd)"
-          echo "--- repo listing ---"
-          ls -la
-
-          echo "--- bucket.txt raw (visible markers) ---"
-          printf '<<START>>\n'
-          sed -n '1,200p' bucket.txt
-          printf '\n<<END>>\n'
-
-          # Trim whitespace/newlines and CR
-          BUCKET=$(cat bucket.txt | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          echo "BUCKET after trim: <<$BUCKET>>"
-
-          # final sanity check: show length and chars
-          echo "bucket length: ${#BUCKET}"
-          echo "bucket chars: $(echo "$BUCKET" | sed -n '1,200p')"
-
-          # upload (debug mode so if it fails we get detail)
-          aws s3 cp dist/index.html s3://$BUCKET/index.html --debug
+          BUCKET=$(cat bucket.txt)
+          echo "PROD site to bucket: $BUCKET"
+          aws s3 cp dist/index.html s3://$BUCKET/index.html
 
       - name: Confirm deployment metadata (optional)
         run: |
