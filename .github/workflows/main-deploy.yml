@@ -31,10 +31,35 @@ jobs:
       - name: Get Terraform outputs (bucket + tables)
         run: |
           cd terraform
+
+          # initialize without prompts
           terraform init -input=false
-          terraform output -raw bucket_name > ../bucket.txt
-          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
-          terraform output -raw resume_analytics_table > ../ddb_analytics.txt
+
+          # Capture raw terraform output into a variable (suppress stderr)
+          RAW_BUCKET=$(terraform -chdir=. output -raw bucket_name 2>/dev/null || true)
+          RAW_TRACKING=$(terraform -chdir=. output -raw deployment_tracking_table 2>/dev/null || true)
+          RAW_ANALYTICS=$(terraform -chdir=. output -raw resume_analytics_table 2>/dev/null || true)
+
+          # Extract the last plausible S3-bucket-like token (lowercase letters, numbers, hyphen, dots)
+          # This filters out any debug text or other noise the runner may have added.
+          # If nothing matches, fall back to the last non-empty line.
+          CLEAN_BUCKET=$(printf "%s\n" "$RAW_BUCKET" | tr -d '\r' | grep -Eo '[a-z0-9][a-z0-9.-]{2,62}' | tail -n1)
+          if [ -z "$CLEAN_BUCKET" ]; then
+            CLEAN_BUCKET=$(printf "%s\n" "$RAW_BUCKET" | tr -d '\r' | sed -n '/./p' | tail -n1)
+          fi
+
+          # Same for tables (less likely to be noisy, but we handle similarly)
+          CLEAN_TRACKING=$(printf "%s\n" "$RAW_TRACKING" | tr -d '\r' | sed -n '/./p' | tail -n1)
+          CLEAN_ANALYTICS=$(printf "%s\n" "$RAW_ANALYTICS" | tr -d '\r' | sed -n '/./p' | tail -n1)
+
+          # Save cleaned values to files one-line each
+          printf "%s\n" "$CLEAN_BUCKET" > ../bucket.txt
+          printf "%s\n" "$CLEAN_TRACKING" > ../ddb_tracking.txt
+          printf "%s\n" "$CLEAN_ANALYTICS" > ../ddb_analytics.txt
+
+          # Show a quick sanity check (keeps the log readable)
+          echo "DEBUG: bucket.txt =>"
+          sed -n '1,5p' ../bucket.txt || true
 
       # ------- Promote beta -> prod -------
       - name: Setup Python
