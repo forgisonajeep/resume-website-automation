@@ -29,10 +29,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Get Terraform outputs (bucket + tables)
-        working-directory: terraform
         run: |
+          cd terraform
           terraform init -input=false
-          terraform output -json bucket_name | jq -r '.' > ../bucket.txt
+          terraform output -raw bucket_name > ../bucket.txt
           terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
           terraform output -raw resume_analytics_table > ../ddb_analytics.txt
 
@@ -72,8 +72,8 @@ jobs:
       - name: Promote beta -> prod
         run: |
           BUCKET=$(cat bucket.txt)
-          echo "PROD site to bucket: [$BUCKET]"
-          aws s3 cp dist/index.html "s3://$BUCKET/index.html"
+          echo "PROD site to bucket: $BUCKET"
+          aws s3 cp dist/index.html s3://$BUCKET/index.html
 
       - name: Confirm deployment metadata (optional)
         run: |
