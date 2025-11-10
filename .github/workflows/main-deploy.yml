@@ -45,6 +45,13 @@ jobs:
       - name: Build resume HTML (local)
         run: python src/build_resume_site.py
 
+      - name: Fix bucket value (strip terraform garbage)
+        run: |
+          # Extract only the last line of bucket.txt, which is the real bucket name
+          tail -n 1 bucket.txt > clean.txt
+          mv clean.txt bucket.txt
+          echo "Cleaned bucket value: $(cat bucket.txt)"
+
       - name: Promote beta -> prod
         run: |
           BUCKET=$(cat bucket.txt)
