@@ -47,7 +47,7 @@ jobs:
 
       - name: Promote beta -> prod
         run: |
-          BUCKET=$(terraform -chdir=terraform output -raw bucket_name)
+          BUCKET=$(cat bucket.txt)
           echo "PROD site to bucket: $BUCKET"
           aws s3 cp dist/index.html s3://$BUCKET/index.html
 
