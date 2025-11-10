@@ -25,11 +25,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Get Terraform outputs (bucket + tables)
         working-directory: terraform
         run: |
           terraform init -input=false
-          terraform output -raw bucket_name > ../bucket.txt
+          terraform output -json bucket_name | jq -r '.' > ../bucket.txt
           terraform output -raw deployment_tracking_table > ../ddb_tracking.txt
           terraform output -raw resume_analytics_table > ../ddb_analytics.txt
 
@@ -70,7 +73,6 @@ jobs:
         run: |
           BUCKET=$(cat bucket.txt)
           echo "PROD site to bucket: [$BUCKET]"
-          # quote the bucket variable to avoid word-splitting / leading dash issues
           aws s3 cp dist/index.html "s3://$BUCKET/index.html"
 
       - name: Confirm deployment metadata (optional)
