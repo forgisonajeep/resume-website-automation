@@ -45,18 +45,33 @@ jobs:
       - name: Build resume HTML (local)
         run: python src/build_resume_site.py
 
-      - name: Fix bucket value (strip terraform garbage)
+      - name: Debug bucket.txt (show raw contents)
         run: |
-          # Extract only the last line of bucket.txt, which is the real bucket name
-          tail -n 1 bucket.txt > clean.txt
-          mv clean.txt bucket.txt
+          echo "---- bucket.txt (visible) ----"
+          nl -ba bucket.txt || true
+          echo "---- bucket.txt (hex) ----"
+          hexdump -C bucket.txt || true
+
+      - name: Fix bucket value (strict clean)
+        run: |
+          # take last non-empty line, strip CR/whitespace, then remove anything not allowed in S3 bucket name
+          LAST_LINE=$(awk 'NF{line=$0}END{print line}' bucket.txt || true)
+          CLEAN=$(printf "%s" "$LAST_LINE" | tr -d '\r\n[:space:]' | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9.-]//g')
+          # fallback if CLEAN is empty
+          if [ -z "$CLEAN" ]; then
+            echo "ERROR: cleaned bucket name is empty; showing original file for debugging"
+            nl -ba bucket.txt
+            exit 1
+          fi
+          printf "%s\n" "$CLEAN" > bucket.txt
           echo "Cleaned bucket value: $(cat bucket.txt)"
 
       - name: Promote beta -> prod
         run: |
           BUCKET=$(cat bucket.txt)
-          echo "PROD site to bucket: $BUCKET"
-          aws s3 cp dist/index.html s3://$BUCKET/index.html
+          echo "PROD site to bucket: [$BUCKET]"
+          # quote the bucket variable to avoid word-splitting / leading dash issues
+          aws s3 cp dist/index.html "s3://$BUCKET/index.html"
 
       - name: Confirm deployment metadata (optional)
         run: |
