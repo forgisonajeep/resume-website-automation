@@ -28,64 +28,54 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Get Terraform outputs (bucket + tables)  # REPLACE existing step with this
+      - name: Get Terraform outputs (bucket + tables)
         run: |
-          set -euo pipefail
-
-          # ensure working from the terraform dir for terraform commands
           cd terraform
 
-          # init (no prompts)
+          # Initialize terraform (no prompts)
           terraform init -input=false
 
-          # create guaranteed files in parent repo root (so other steps can always read them)
-          mkdir -p ../
-          : > ../bucket.txt
-          : > ../ddb_tracking.txt
-          : > ../ddb_analytics.txt
+          # Write raw terraform output (stdout only) to temp files
+          terraform output -raw bucket_name  > /tmp/raw_bucket.out 2>/dev/null || true
+          terraform output -raw deployment_tracking_table > /tmp/raw_tracking.out 2>/dev/null || true
+          terraform output -raw resume_analytics_table    > /tmp/raw_analytics.out 2>/dev/null || true
 
-          # run terraform output and capture both stdout and stderr into files for debugging
-          terraform -chdir=. output -raw bucket_name > /tmp/raw_bucket.out 2> /tmp/raw_bucket.err || true
-          terraform -chdir=. output -raw deployment_tracking_table > /tmp/raw_tracking.out 2> /tmp/raw_tracking.err || true
-          terraform -chdir=. output -raw resume_analytics_table > /tmp/raw_analytics.out 2> /tmp/raw_analytics.err || true
+          cd ..
 
-          # show brief debug so you can inspect runner noise if something goes wrong
-          echo "==== terraform raw stdout (bucket) ===="
-          sed -n '1,40p' /tmp/raw_bucket.out || true
-          echo "==== terraform raw stderr (bucket) ===="
-          sed -n '1,40p' /tmp/raw_bucket.err || true
+          echo "----- RAW bucket output (visible) -----"
+          sed -n '1,10p' /tmp/raw_bucket.out || true
+          echo "---------------------------------------"
 
-          # extract last plausible S3 bucket token from raw stdout (lowercase letters/digits/dots/hyphens)
-          CLEAN_BUCKET=$(sed 's/\r$//' /tmp/raw_bucket.out | grep -Eo '[a-z0-9][a-z0-9.-]{2,62}' | tail -n1 || true)
+          # --- STRICT CLEANING LOGIC ---
+          # Try to extract ONLY bucket-like tokens:
+          #  valid S3 bucket characters (a-z, 0-9, hyphen, dot)
+          #  MUST contain a hyphen (prevents matching words like 'exitcode')
+          #  ignore common debug garbage (stdout, stderr, exitcode, debug, etc)
 
-          # fallback: if none matched, fall back to the last non-empty line of the raw stdout
+          CLEAN_BUCKET=$(
+            sed 's/\r$//' /tmp/raw_bucket.out \
+            | grep -Eo '[a-z0-9][a-z0-9.-]{2,62}' \
+            | grep '-' \
+            | grep -Ev '^(stdout|stderr|exitcode|debug|::debug::|::group::|::endgroup::)$' \
+            | tail -n1 || true
+          )
+
+          # Fallback: last non-empty line, then reject if it equals known noise
           if [ -z "$CLEAN_BUCKET" ]; then
             CLEAN_BUCKET=$(sed 's/\r$//' /tmp/raw_bucket.out | sed -n '/./p' | tail -n1 || true)
+            case "$CLEAN_BUCKET" in
+              stdout|stderr|exitcode|debug) CLEAN_BUCKET="";;
+            esac
           fi
 
-          # do the same for table names (simpler fallback)
-          CLEAN_TRACKING=$(sed 's/\r$//' /tmp/raw_tracking.out | sed -n '/./p' | tail -n1 || true)
-          CLEAN_ANALYTICS=$(sed 's/\r$//' /tmp/raw_analytics.out | sed -n '/./p' | tail -n1 || true)
+          # Save cleaned bucket + tables for next steps
+          printf "%s\n" "$CLEAN_BUCKET" > bucket.txt
+          printf "%s\n" "$(sed -n '/./p' /tmp/raw_tracking.out | tail -n1)" > ddb_tracking.txt
+          printf "%s\n" "$(sed -n '/./p' /tmp/raw_analytics.out | tail -n1)" > ddb_analytics.txt
 
-          # ensure variables are non-null strings (avoid "no such file" later)
-          CLEAN_BUCKET=${CLEAN_BUCKET:-}
-          CLEAN_TRACKING=${CLEAN_TRACKING:-}
-          CLEAN_ANALYTICS=${CLEAN_ANALYTICS:-}
-
-          # write to repo-root files that later steps will read
-          printf "%s\n" "$CLEAN_BUCKET" > ../bucket.txt
-          printf "%s\n" "$CLEAN_TRACKING" > ../ddb_tracking.txt
-          printf "%s\n" "$CLEAN_ANALYTICS" > ../ddb_analytics.txt
-
-          # final short sanity print for the workflow log
-          echo "DEBUG: bucket.txt =>"
-          sed -n '1,5p' ../bucket.txt || true
-          echo "DEBUG: ddb_tracking.txt =>"
-          sed -n '1,5p' ../ddb_tracking.txt || true
-          echo "DEBUG: ddb_analytics.txt =>"
-          sed -n '1,5p' ../ddb_analytics.txt || true
-
-        shell: bash
+          echo "Cleaned bucket value: $CLEAN_BUCKET"
+          echo "bucket.txt contains:"
+          cat bucket.txt
 
       # ------- Promote beta -> prod -------
       - name: Setup Python
