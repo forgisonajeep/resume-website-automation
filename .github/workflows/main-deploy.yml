@@ -1,12 +1,13 @@
-name: Promote beta -> prod
+name: PR -> deploy (beta)
 
 on:
-  push:
+  pull_request:
     branches:
       - main
 
 jobs:
-  promote:
+  deploy:
+    name: deploy beta
     runs-on: ubuntu-latest
 
     steps:
@@ -18,47 +19,33 @@ jobs:
         with:
           terraform_version: 1.6.6
 
-      - name: Set up AWS credentials
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Get Terraform outputs (bucket + tables)
+      - name: Terraform init + plan + validate
         run: |
-          cd terraform
-          terraform init -input=false
-          terraform output -raw bucket_name  > /tmp/raw_bucket.out 2>/dev/null || true
-          terraform output -raw deployment_tracking_table > /tmp/raw_tracking.out 2>/dev/null || true
-          terraform output -raw resume_analytics_table    > /tmp/raw_analytics.out 2>/dev/null || true
-          cd ..
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform validate
+          terraform -chdir=terraform plan
 
-          # Strict cleaning for bucket and safe last-line capture for tables
-          CLEAN_BUCKET=$(
-            sed 's/\r$//' /tmp/raw_bucket.out \
-            | grep -Eo '[a-z0-9][a-z0-9.-]{2,62}' \
-            | grep '-' \
-            | grep -Ev '^(stdout|stderr|exitcode|debug|::debug::|::group::|::endgroup::)$' \
-            | tail -n1 || true
-          )
-          if [ -z "$CLEAN_BUCKET" ]; then
-            CLEAN_BUCKET=$(sed 's/\r$//' /tmp/raw_bucket.out | sed -n '/./p' | tail -n1 || true)
-            case "$CLEAN_BUCKET" in
-              stdout|stderr|exitcode|debug) CLEAN_BUCKET="";;
-            esac
-          fi
+      - name: Terraform apply (auto-approve) (create/update infra)
+        run: terraform -chdir=terraform apply -auto-approve
 
-          printf "%s\n" "$CLEAN_BUCKET" > bucket.txt
-          printf "%s\n" "$(sed -n '/./p' /tmp/raw_tracking.out | tail -n1)" > ddb_tracking.txt
-          printf "%s\n" "$(sed -n '/./p' /tmp/raw_analytics.out | tail -n1)" > ddb_analytics.txt
+      - name: Read terraform outputs (bucket name & website endpoint)
+        id: tf_outputs
+        run: |
+          terraform -chdir=terraform output -raw bucket_name        > bucket.txt
+          terraform -chdir=terraform output -raw deployment_tracking_table > ddb_tracking.txt
+          terraform -chdir=terraform output -raw resume_analytics_table    > ddb_analytics.txt
 
-          echo "Cleaned bucket value: $CLEAN_BUCKET"
-          echo "bucket.txt contains:"
+          echo "---- bucket from terraform ----"
           cat bucket.txt
+          echo "---- tracking table ----"
+          cat ddb_tracking.txt
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -71,68 +58,29 @@ jobs:
       - name: Build resume HTML (local)
         run: python src/build_resume_site.py
 
-      - name: Debug bucket.txt (show raw contents)
-        run: |
-          echo "---- bucket.txt (visible) ----"
-          nl -ba bucket.txt || true
-          echo "---- bucket.txt (hex) ----"
-          hexdump -C bucket.txt || true
-
-      - name: Fix bucket value (strict clean)
-        run: |
-          LAST_LINE=$(awk 'NF{line=$0}END{print line}' bucket.txt || true)
-          CLEAN=$(printf "%s" "$LAST_LINE" | tr -d '\r\n[:space:]' | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9.-]//g')
-          if [ -z "$CLEAN" ]; then
-            echo "ERROR: cleaned bucket name is empty; showing original file for debugging"
-            nl -ba bucket.txt
-            exit 1
-          fi
-          printf "%s\n" "$CLEAN" > bucket.txt
-          echo "Cleaned bucket value: $(cat bucket.txt)"
-
-      - name: Promote beta -> prod
+      - name: Upload site to S3 (beta)
         run: |
           BUCKET=$(cat bucket.txt)
-          echo "PROD site to bucket: $BUCKET"
+          echo "Uploading resume site to: $BUCKET"
           aws s3 cp dist/index.html s3://$BUCKET/index.html
 
-      - name: Write deployment event to DynamoDB
-        run: |
-          echo "Writing deployment record to DynamoDB (table from ddb_tracking.txt)"
-          python scripts/write_deployment_event.py
-
-      - name: Confirm deployment metadata (optional)
-        run: |
-          echo "DeploymentTracking table: $(cat ddb_tracking.txt)"
-          echo "ResumeAnalytics table: $(cat ddb_analytics.txt)"
-          echo "Promotion complete"
-
-      # ---------- NEW: record deployment to DynamoDB ----------
+      # ------------ NEW SECTION: write deployment event to DynamoDB ------------
       - name: Record deployment event to DynamoDB
         id: record_ddb
         run: |
-          # env label: you can set to "prod" (or "beta" if promoting beta)
-          ENVIRONMENT="prod"
           python scripts/write_deployment_event.py \
             --table-file ddb_tracking.txt \
             --bucket-file bucket.txt \
-            --environment "$ENVIRONMENT" \
+            --environment "beta" \
             --region "${{ secrets.AWS_REGION }}" || true
-        # do not fail the whole job for non-critical telemetry errors; remove "|| true" if you want it to fail
+      # -------------------------------------------------------------------------
+
+      - name: Output S3 website endpoint (for screenshots)
+        run: |
+          endpoint=$(terraform -chdir=terraform output -raw website_endpoint || true)
+          echo "Website available at: $endpoint"
 
       - name: Cleanup temp files
         if: always()
         run: |
           rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true
-
-      - name: Post Setup Python
-        run: echo "Post setup"
-
-      - name: Post Set up AWS credentials
-        run: echo "Post AWS creds"
-
-      - name: Post Checkout repository
-        run: echo "Post checkout"
-
-      - name: Complete job
-        run: echo "Done"
