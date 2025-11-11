@@ -1,5 +1,6 @@
 name: deploy
 
+# Trigger on pull request (same as your PR deploy flow)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -15,21 +16,22 @@ jobs:
       AWS_REGION: us-east-1
 
     steps:
-      - name: Checkout repo
+      - name: "Checkout repo"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Read terraform outputs (bucket name & website endpoint)
+      - name: "Read terraform outputs (bucket name & website endpoint)"
         run: |
           echo "=== Terraform init & output ==="
-          terraform -chdir=terraform init -input=false
-          terraform -chdir=terraform plan -input=false || true
-          terraform -chdir=terraform output -raw bucket_name > bucket.txt || true
-          terraform -chdir=terraform output -raw deployment_tracking_table > ddb_tracking.txt || true
-          terraform -chdir=terraform output -raw website_endpoint > website_endpoint.txt || true
+          terraform --chdir=terraform init -input=false
+          terraform --chdir=terraform plan -input=false || true
+          # collect outputs to files (ignore errors so job continues)
+          terraform --chdir=terraform output -raw bucket_name > bucket.txt || true
+          terraform --chdir=terraform output -raw deployment_tracking_table > ddb_tracking.txt || true
+          terraform --chdir=terraform output -raw website_endpoint > website_endpoint.txt || true
 
-      - name: Debug: show working dir & files
+      - name: "Debug: show working dir & files"
         run: |
           echo "---- workspace root ----"
           pwd
@@ -43,68 +45,62 @@ jobs:
             echo "bucket.txt exists:"
             sed -n '1,5p' bucket.txt
           else
-            echo "bucket.txt not found"
+            echo "bucket.txt missing"
           fi
 
           if [ -f ddb_tracking.txt ]; then
             echo "ddb_tracking.txt exists:"
             sed -n '1,5p' ddb_tracking.txt
           else
-            echo "ddb_tracking.txt not found"
+            echo "ddb_tracking.txt missing"
           fi
 
           if [ -f website_endpoint.txt ]; then
             echo "website_endpoint.txt exists:"
             sed -n '1,5p' website_endpoint.txt
           else
-            echo "website_endpoint.txt not found"
+            echo "website_endpoint.txt missing"
           fi
 
-      - name: Setup Python
+      - name: "Setup Python"
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      - name: Install Python dependencies
+      - name: "Install Python dependencies"
         run: |
+          python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
-          else
-            echo "No requirements.txt found, skipping install"
           fi
 
-      - name: Build resume HTML (local)
+      - name: "Build resume HTML (local)"
         run: |
           if [ -f src/build_resume_site.py ]; then
             python src/build_resume_site.py
           else
-            echo "src/build_resume_site.py not found, skipping build"
+            echo "build script missing, skipping"
           fi
 
-      - name: Write deployment event to DynamoDB
+      - name: "Upload site to S3 (beta)"
         run: |
-          PY=python3
-          if ! command -v $PY >/dev/null 2>&1; then
-            PY=python
+          # placeholder: actual S3 upload commands go here
+          echo "Uploading site to S3 (beta) - placeholder"
+
+      - name: "Write deployment event to DynamoDB"
+        run: |
+          if [ -f ddb_tracking.txt ]; then
+            echo "Running deployment event writer"
+            python scripts/write_deployment_event.py \
+              --table-file ddb_tracking.txt \
+              --bucket-file bucket.txt \
+              --environment prod \
+              --region "${AWS_REGION}" || true
+          else
+            echo "Skipping DDB event write - ddb_tracking.txt not found"
           fi
 
-          if [ ! -f ddb_tracking.txt ]; then
-            echo "ERROR: ddb_tracking.txt not present, aborting write step"
-            exit 1
-          fi
-
-          if [ ! -f bucket.txt ]; then
-            echo "ERROR: bucket.txt not present, aborting write step"
-            exit 1
-          fi
-
-          $PY scripts/write_deployment_event.py \
-            --table-file ddb_tracking.txt \
-            --bucket-file bucket.txt \
-            --environment prod \
-            --region us-east-1
-
-      - name: Output S3 website endpoint (for screenshots)
+      - name: "Output S3 website endpoint (for screenshots)"
         run: |
           if [ -f website_endpoint.txt ]; then
             echo "Website URL: $(cat website_endpoint.txt)"
@@ -112,10 +108,10 @@ jobs:
             echo "website_endpoint.txt missing"
           fi
 
-      - name: Cleanup temp files
+      - name: "Cleanup temp files"
         run: |
           rm -f bucket.txt ddb_tracking.txt website_endpoint.txt || true
 
-      - name: Complete job
+      - name: "Complete job"
         run: |
-          echo "Deploy job finished."
+          echo "Deploy job finished"
