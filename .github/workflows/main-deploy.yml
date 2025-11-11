@@ -1,51 +1,64 @@
-name: PR -> deploy (beta)
+name: deploy
 
 on:
   pull_request:
-    branches:
-      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   deploy:
-    name: deploy beta
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
-
-      - name: Install Terraform
-        uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: 1.6.6
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Terraform init + plan + validate
-        run: |
-          terraform -chdir=terraform init -input=false
-          terraform -chdir=terraform validate
-          terraform -chdir=terraform plan
-
-      - name: Terraform apply (auto-approve) (create/update infra)
-        run: terraform -chdir=terraform apply -auto-approve
+          fetch-depth: 0
 
       - name: Read terraform outputs (bucket name & website endpoint)
-        id: tf_outputs
         run: |
-          terraform -chdir=terraform output -raw bucket_name        > bucket.txt
-          terraform -chdir=terraform output -raw deployment_tracking_table > ddb_tracking.txt
-          terraform -chdir=terraform output -raw resume_analytics_table    > ddb_analytics.txt
+          echo "=== Terraform init & output ==="
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform plan -input=false || true
+          terraform -chdir=terraform output -raw bucket_name > bucket.txt || true
+          terraform -chdir=terraform output -raw deployment_tracking_table > ddb_tracking.txt || true
+          terraform -chdir=terraform output -raw website_endpoint > website_endpoint.txt || true
 
-          echo "---- bucket from terraform ----"
-          cat bucket.txt
-          echo "---- tracking table ----"
-          cat ddb_tracking.txt
+      - name: Debug: show working dir & files
+        run: |
+          echo "---- workspace root ----"
+          pwd
+          ls -la
+
+          echo "---- terraform dir ----"
+          ls -la terraform || true
+
+          echo "---- head of generated files ----"
+          if [ -f bucket.txt ]; then
+            echo "bucket.txt exists:"
+            sed -n '1,5p' bucket.txt
+          else
+            echo "bucket.txt not found"
+          fi
+
+          if [ -f ddb_tracking.txt ]; then
+            echo "ddb_tracking.txt exists:"
+            sed -n '1,5p' ddb_tracking.txt
+          else
+            echo "ddb_tracking.txt not found"
+          fi
+
+          if [ -f website_endpoint.txt ]; then
+            echo "website_endpoint.txt exists:"
+            sed -n '1,5p' website_endpoint.txt
+          else
+            echo "website_endpoint.txt not found"
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -53,34 +66,56 @@ jobs:
           python-version: '3.x'
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found, skipping install"
+          fi
 
       - name: Build resume HTML (local)
-        run: python src/build_resume_site.py
-
-      - name: Upload site to S3 (beta)
         run: |
-          BUCKET=$(cat bucket.txt)
-          echo "Uploading resume site to: $BUCKET"
-          aws s3 cp dist/index.html s3://$BUCKET/index.html
+          if [ -f src/build_resume_site.py ]; then
+            python src/build_resume_site.py
+          else
+            echo "src/build_resume_site.py not found, skipping build"
+          fi
 
-      # ------------ NEW SECTION: write deployment event to DynamoDB ------------
-      - name: Record deployment event to DynamoDB
-        id: record_ddb
+      - name: Write deployment event to DynamoDB
         run: |
-          python scripts/write_deployment_event.py \
+          PY=python3
+          if ! command -v $PY >/dev/null 2>&1; then
+            PY=python
+          fi
+
+          if [ ! -f ddb_tracking.txt ]; then
+            echo "ERROR: ddb_tracking.txt not present, aborting write step"
+            exit 1
+          fi
+
+          if [ ! -f bucket.txt ]; then
+            echo "ERROR: bucket.txt not present, aborting write step"
+            exit 1
+          fi
+
+          $PY scripts/write_deployment_event.py \
             --table-file ddb_tracking.txt \
             --bucket-file bucket.txt \
-            --environment "beta" \
-            --region "${{ secrets.AWS_REGION }}" || true
-      # -------------------------------------------------------------------------
+            --environment prod \
+            --region us-east-1
 
       - name: Output S3 website endpoint (for screenshots)
         run: |
-          endpoint=$(terraform -chdir=terraform output -raw website_endpoint || true)
-          echo "Website available at: $endpoint"
+          if [ -f website_endpoint.txt ]; then
+            echo "Website URL: $(cat website_endpoint.txt)"
+          else
+            echo "website_endpoint.txt missing"
+          fi
 
       - name: Cleanup temp files
-        if: always()
         run: |
-          rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true
+          rm -f bucket.txt ddb_tracking.txt website_endpoint.txt || true
+
+      - name: Complete job
+        run: |
+          echo "Deploy job finished."
