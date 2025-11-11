@@ -36,12 +36,17 @@ jobs:
       - name: "Read terraform outputs (bucket name & website endpoint)"
         run: |
           echo "=== Terraform init & output ==="
-          terraform --chdir=terraform init -input=false
-          terraform --chdir=terraform plan -input=false || true
+          # run terraform commands from inside the terraform directory to avoid
+          # global-flag / wrapper issues on the runner
+          cd terraform
+          terraform init -input=false
+          terraform plan -input=false || true
           # collect outputs to files (ignore errors so job continues)
-          terraform --chdir=terraform output -raw bucket_name > bucket.txt || true
-          terraform --chdir=terraform output -raw deployment_tracking_table > ddb_tracking.txt || true
-          terraform --chdir=terraform output -raw website_endpoint > website_endpoint.txt || true
+          terraform output -raw bucket_name > ../bucket.txt || true
+          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt || true
+          terraform output -raw website_endpoint > ../website_endpoint.txt || true
+          # return to repo root
+          cd -
 
       - name: "Debug: show working dir & files"
         run: |
