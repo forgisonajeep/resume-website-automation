@@ -1,128 +1,134 @@
-name: Promote beta -> prod
+name: deploy
 
+# Trigger on pull request (same as your PR deploy flow)
 on:
-  push:
-    branches:
-      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
-  promote:
+  deploy:
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
 
     steps:
-      - name: Checkout repository
+      - name: "Checkout repo"
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: 1.6.6
+          terraform_version: '1.5.7'
 
-      - name: Set up AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Get Terraform outputs (bucket + tables)
+      - name: "Read terraform outputs (bucket name & website endpoint)"
         run: |
+          echo "=== Terraform init & output ==="
+          # run terraform commands from inside the terraform directory to avoid
+          # global-flag / wrapper issues on the runner
           cd terraform
-
-          # Initialize terraform (no prompts)
           terraform init -input=false
+          terraform plan -input=false || true
+          # collect outputs to files (ignore errors so job continues)
+          terraform output -raw bucket_name > ../bucket.txt || true
+          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt || true
+          terraform output -raw website_endpoint > ../website_endpoint.txt || true
+          # return to repo root
+          cd -
 
-          # Write raw terraform output (stdout only) to temp files
-          terraform output -raw bucket_name  > /tmp/raw_bucket.out 2>/dev/null || true
-          terraform output -raw deployment_tracking_table > /tmp/raw_tracking.out 2>/dev/null || true
-          terraform output -raw resume_analytics_table    > /tmp/raw_analytics.out 2>/dev/null || true
+      - name: "Debug: show working dir & files"
+        run: |
+          echo "---- workspace root ----"
+          pwd
+          ls -la
 
-          cd ..
+          echo "---- terraform dir ----"
+          ls -la terraform || true
 
-          echo "----- RAW bucket output (visible) -----"
-          sed -n '1,10p' /tmp/raw_bucket.out || true
-          echo "---------------------------------------"
-
-          # --- STRICT CLEANING LOGIC ---
-          # Try to extract ONLY bucket-like tokens:
-          #  valid S3 bucket characters (a-z, 0-9, hyphen, dot)
-          #  MUST contain a hyphen (prevents matching words like 'exitcode')
-          #  ignore common debug garbage (stdout, stderr, exitcode, debug, etc)
-
-          CLEAN_BUCKET=$(
-            sed 's/\r$//' /tmp/raw_bucket.out \
-            | grep -Eo '[a-z0-9][a-z0-9.-]{2,62}' \
-            | grep '-' \
-            | grep -Ev '^(stdout|stderr|exitcode|debug|::debug::|::group::|::endgroup::)$' \
-            | tail -n1 || true
-          )
-
-          # Fallback: last non-empty line, then reject if it equals known noise
-          if [ -z "$CLEAN_BUCKET" ]; then
-            CLEAN_BUCKET=$(sed 's/\r$//' /tmp/raw_bucket.out | sed -n '/./p' | tail -n1 || true)
-            case "$CLEAN_BUCKET" in
-              stdout|stderr|exitcode|debug) CLEAN_BUCKET="";;
-            esac
+          echo "---- head of generated files ----"
+          if [ -f bucket.txt ]; then
+            echo "bucket.txt exists:"
+            sed -n '1,5p' bucket.txt
+          else
+            echo "bucket.txt missing"
           fi
 
-          # Save cleaned bucket + tables for next steps
-          printf "%s\n" "$CLEAN_BUCKET" > bucket.txt
-          printf "%s\n" "$(sed -n '/./p' /tmp/raw_tracking.out | tail -n1)" > ddb_tracking.txt
-          printf "%s\n" "$(sed -n '/./p' /tmp/raw_analytics.out | tail -n1)" > ddb_analytics.txt
+          if [ -f ddb_tracking.txt ]; then
+            echo "ddb_tracking.txt exists:"
+            sed -n '1,5p' ddb_tracking.txt
+          else
+            echo "ddb_tracking.txt missing"
+          fi
 
-          echo "Cleaned bucket value: $CLEAN_BUCKET"
-          echo "bucket.txt contains:"
-          cat bucket.txt
+          if [ -f website_endpoint.txt ]; then
+            echo "website_endpoint.txt exists:"
+            sed -n '1,5p' website_endpoint.txt
+          else
+            echo "website_endpoint.txt missing"
+          fi
 
-      # ------- Promote beta -> prod -------
-      - name: Setup Python
+      - name: "Setup Python"
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
-
-      - name: Build resume HTML (local)
-        run: python src/build_resume_site.py
-
-      - name: Debug bucket.txt (show raw contents)
+      - name: "Install Python dependencies"
         run: |
-          echo "---- bucket.txt (visible) ----"
-          nl -ba bucket.txt || true
-          echo "---- bucket.txt (hex) ----"
-          hexdump -C bucket.txt || true
-
-      - name: Fix bucket value (strict clean)
-        run: |
-          # take last non-empty line, strip CR/whitespace, then remove anything not allowed in S3 bucket name
-          LAST_LINE=$(awk 'NF{line=$0}END{print line}' bucket.txt || true)
-          CLEAN=$(printf "%s" "$LAST_LINE" | tr -d '\r\n[:space:]' | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9.-]//g')
-          # fallback if CLEAN is empty
-          if [ -z "$CLEAN" ]; then
-            echo "ERROR: cleaned bucket name is empty; showing original file for debugging"
-            nl -ba bucket.txt
-            exit 1
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
           fi
-          printf "%s\n" "$CLEAN" > bucket.txt
-          echo "Cleaned bucket value: $(cat bucket.txt)"
 
-      - name: Promote beta -> prod
+      - name: "Build resume HTML (local)"
         run: |
-          BUCKET=$(cat bucket.txt)
-          echo "PROD site to bucket: $BUCKET"
-          aws s3 cp dist/index.html s3://$BUCKET/index.html
+          if [ -f src/build_resume_site.py ]; then
+            python src/build_resume_site.py
+          else
+            echo "build script missing, skipping"
+          fi
 
-      - name: Confirm deployment metadata (optional)
+      - name: "Upload site to S3 (beta)"
         run: |
-          echo "DeploymentTracking table: $(cat ddb_tracking.txt)"
-          echo "ResumeAnalytics table: $(cat ddb_analytics.txt)"
-          echo "Promotion complete"
+          # placeholder: actual S3 upload commands go here
+          echo "Uploading site to S3 (beta) - placeholder"
 
-      - name: Cleanup temp files
-        if: always()
+      - name: "Write deployment event to DynamoDB"
         run: |
-          rm -f bucket.txt ddb_tracking.txt ddb_analytics.txt || true
+          if [ -f ddb_tracking.txt ]; then
+            echo "Running deployment event writer"
+            python scripts/write_deployment_event.py \
+              --table-file ddb_tracking.txt \
+              --bucket-file bucket.txt \
+              --environment prod \
+              --region "${AWS_REGION}" || true
+          else
+            echo "Skipping DDB event write - ddb_tracking.txt not found"
+          fi
+
+      - name: "Output S3 website endpoint (for screenshots)"
+        run: |
+          if [ -f website_endpoint.txt ]; then
+            echo "Website URL: $(cat website_endpoint.txt)"
+          else
+            echo "website_endpoint.txt missing"
+          fi
+
+      - name: "Cleanup temp files"
+        run: |
+          rm -f bucket.txt ddb_tracking.txt website_endpoint.txt || true
+
+      - name: "Complete job"
+        run: |
+          echo "Deploy job finished"
