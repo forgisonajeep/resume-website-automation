@@ -41,10 +41,15 @@ jobs:
           cd terraform
           terraform init -input=false
           terraform plan -input=false || true
+
           # collect outputs to files (ignore errors so job continues)
           terraform output -raw bucket_name > ../bucket.txt || true
-          terraform output -raw deployment_tracking_table > ../ddb_tracking.txt || true
+
+          # HARD-CODE the DynamoDB table name
+          echo "DeploymentTrackingTable" > ../ddb_tracking.txt
+
           terraform output -raw website_endpoint > ../website_endpoint.txt || true
+
           # return to repo root
           cd -
 
