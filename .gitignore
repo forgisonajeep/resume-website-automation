@@ -217,3 +217,7 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 ddb_tracking.txt
+
+# Project-specific build + temp files
+dist/
+bucket.txt
