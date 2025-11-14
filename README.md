@@ -92,8 +92,8 @@ s3://<bucket>/beta/           s3://<bucket>/index.html
 
 (beta deploy does NOT write to DynamoDB)
 
+```
 ---
-
 ## Repository Structure
 
     .
