@@ -109,10 +109,32 @@ jobs:
             echo "build script missing, skipping"
           fi
 
-      - name: "Upload site to S3 (beta)"
+      - name: "Promote beta build to prod (S3)"
         run: |
-          # placeholder: actual S3 upload commands go here
-          echo "Uploading site to S3 (beta) - placeholder"
+          if [ ! -f bucket.txt ]; then
+            echo "bucket.txt missing - cannot promote to prod"
+            exit 1
+          fi
+
+          BUCKET_NAME=$(cat bucket.txt)
+          echo "Using bucket: ${BUCKET_NAME}"
+
+          echo "Checking for beta/index.html..."
+          aws s3 ls "s3://${BUCKET_NAME}/beta/index.html"
+
+          echo "Copying beta/index.html -> prod/index.html..."
+          aws s3 cp \
+            "s3://${BUCKET_NAME}/beta/index.html" \
+            "s3://${BUCKET_NAME}/prod/index.html" \
+            --metadata-directive REPLACE \
+            --content-type text/html
+
+          echo "Copying prod/index.html -> root index.html (for website endpoint)..."
+          aws s3 cp \
+            "s3://${BUCKET_NAME}/prod/index.html" \
+            "s3://${BUCKET_NAME}/index.html" \
+            --metadata-directive REPLACE \
+            --content-type text/html
 
       - name: "Write deployment event to DynamoDB"
         run: |
