@@ -38,24 +38,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: "Read terraform outputs (bucket name & website endpoint)"
+      - name: Read Terraform outputs (bucket name & website endpoint)
         run: |
-          echo "=== Terraform init & output ==="
-          # run terraform commands from inside the terraform directory to avoid
-          # global-flag / wrapper issues on the runner
+          echo "=== Terraform init & output (prod deploy) ==="
           cd terraform
+
           terraform init -input=false
-          terraform plan -input=false || true
 
-          # collect outputs to files (ignore errors so job continues)
-          terraform output -raw bucket_name > ../bucket.txt || true
-
-          # HARD-CODE the DynamoDB table name
+          # Extract clean outputs
+          terraform output -raw bucket_name | tr -d '\r' > ../bucket.txt
           echo "DeploymentTrackingTable" > ../ddb_tracking.txt
+          terraform output -raw website_endpoint | tr -d '\r' > ../website_endpoint.txt
 
-          terraform output -raw website_endpoint > ../website_endpoint.txt || true
-
-          # return to repo root
           cd -
 
       - name: "Debug: show working dir & files"
