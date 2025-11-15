@@ -107,20 +107,16 @@ jobs:
         run: |
           echo "=== Promote beta build to prod ==="
 
-          # Get a CLEAN bucket name straight from Terraform
-          cd terraform
-          BUCKET_NAME=$(terraform output -raw bucket_name | tr -d '\r')
-          cd -
-
-          if [ -z "$BUCKET_NAME" ]; then
-            echo "Bucket name is empty - cannot promote"
-            exit 1
-          fi
+          # Hard-code the bucket name to avoid Terraform wrapper noise
+          BUCKET_NAME="cameron-resume-site-11062025"
 
           echo "Using bucket: ${BUCKET_NAME}"
 
           echo "Checking for beta/index.html..."
-          aws s3 ls "s3://${BUCKET_NAME}/beta/index.html"
+          if ! aws s3 ls "s3://${BUCKET_NAME}/beta/index.html"; then
+            echo "ERROR: beta/index.html not found in bucket ${BUCKET_NAME}"
+            exit 1
+          fi
 
           echo "Copying beta/index.html -> prod/index.html..."
           aws s3 cp \
@@ -136,8 +132,8 @@ jobs:
             --metadata-directive REPLACE \
             --content-type text/html
 
-          # Refresh bucket.txt with the clean name for later steps
-          echo "$BUCKET_NAME" > bucket.txt
+          # Refresh bucket.txt with the clean name for the DDB step
+          echo "${BUCKET_NAME}" > bucket.txt
 
       - name: "Write deployment event to DynamoDB"
         run: |
