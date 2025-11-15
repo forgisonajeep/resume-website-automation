@@ -60,13 +60,10 @@ jobs:
           python src/build_resume_site.py
 
       - name: Write ATS analytics to DynamoDB (beta)
+        continue-on-error: true
         run: |
           . .venv/bin/activate
-          if [ -f ddb_analytics.txt ] && [ -f dist/ats_analysis.json ]; then
-            python scripts/write_ats_analytics.py
-          else
-            echo "::warning::Missing ddb_analytics.txt or dist/ats_analysis.json - skipping ATS write"
-          fi
+          python scripts/write_ats_analytics.py
 
       - name: Upload site to S3 (beta)
         run: |
