@@ -84,6 +84,7 @@ Seventy-First High School, Fayetteville, NC — 2007
 - CompTIA Server+ — Completed (status: OK in CompTIA portal)
 - AWS Certified Cloud Practitioner – In Progress  
 - AWS Certified Developer – Associate – In Progress  
-- Certified AI Practitioner (CAIP) – In Progress  
+- Certified AI Practitioner  – In Progress  
 - HashiCorp Certified: Terraform Associate – In Progress  
  
+- Test AI deployment 🚀
