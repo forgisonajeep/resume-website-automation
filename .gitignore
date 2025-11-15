@@ -221,3 +221,4 @@ ddb_tracking.txt
 # Project-specific build + temp files
 dist/
 bucket.txt
+.DS_Store
