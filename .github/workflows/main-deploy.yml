@@ -105,12 +105,18 @@ jobs:
 
       - name: "Promote beta build to prod (S3)"
         run: |
-          if [ ! -f bucket.txt ]; then
-            echo "bucket.txt missing - cannot promote to prod"
+          echo "=== Promote beta build to prod ==="
+
+          # Get a CLEAN bucket name straight from Terraform
+          cd terraform
+          BUCKET_NAME=$(terraform output -raw bucket_name | tr -d '\r')
+          cd -
+
+          if [ -z "$BUCKET_NAME" ]; then
+            echo "Bucket name is empty - cannot promote"
             exit 1
           fi
 
-          BUCKET_NAME=$(cat bucket.txt)
           echo "Using bucket: ${BUCKET_NAME}"
 
           echo "Checking for beta/index.html..."
@@ -130,6 +136,9 @@ jobs:
             --metadata-directive REPLACE \
             --content-type text/html
 
+          # Refresh bucket.txt with the clean name for later steps
+          echo "$BUCKET_NAME" > bucket.txt
+
       - name: "Write deployment event to DynamoDB"
         run: |
           if [ -f ddb_tracking.txt ]; then
@@ -143,7 +152,7 @@ jobs:
             echo "Skipping DDB event write - ddb_tracking.txt not found"
           fi
 
-      - name: "Output S3 website endpoint (for screenshots)"
+      - name: "Output S3 website endpoint"
         run: |
           if [ -f website_endpoint.txt ]; then
             echo "Website URL: $(cat website_endpoint.txt)"
