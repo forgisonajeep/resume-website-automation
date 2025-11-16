@@ -69,12 +69,12 @@ jobs:
             echo "::warning::bucket.txt not found, skipping upload"
           fi
 
-      - name: "Write ATS analytics to DynamoDB (beta)"
+      - name: Write ATS analytics to DynamoDB (beta)
         run: |
-          echo "Running ATS analytics write step"
+          echo "ResumeAnalyticsTable" > ddb_analytics.txt
           python scripts/write_ats_analytics.py \
-            --region "${AWS_REGION}" \
-            --table "ResumeAnalyticsTable"
+            --table-file ddb_analytics.txt \
+            --region "${AWS_REGION}"
 
       - name: Output S3 website endpoint (for screenshots)
         run: |
