@@ -30,13 +30,11 @@ def extract_bedrock_json(raw_output: str) -> dict | None:
     if not raw_output:
         return None
 
-    # Strip code-fence markers if present
     cleaned = raw_output
 
-    # Remove leading ```... lines
+    # Split on ``` fences and pick the part that contains JSON
     if "```" in cleaned:
         parts = cleaned.split("```")
-        # usually: ['', 'tabular-data-json\n{...}', '']
         for part in parts:
             if "{" in part and "}" in part:
                 cleaned = part
@@ -58,7 +56,7 @@ def extract_bedrock_json(raw_output: str) -> dict | None:
 
 
 def main() -> None:
-    # 1) Read table name from terraform-created file
+    # 1) Read table name from terraform-created file (ddb_analytics.txt)
     table_name = read_first_line("ddb_analytics.txt")
 
     # 2) Load the ATS analysis JSON produced by build_resume_site.py
@@ -76,16 +74,17 @@ def main() -> None:
     suggestions = analysis.get("suggestions", "")
     raw_output = analysis.get("raw_output", "")
 
-    # 2b) If overall_score is 0 but Bedrock actually returned
-    # a tabular-data-json block, try to pull the real numbers
-    if overall_score == 0 and isinstance(raw_output, str) and "tabular-data-json" in raw_output:
+    # 2b) Always try to pull real values from Bedrock's tabular-data-json block
+    inner = None
+    if isinstance(raw_output, str) and "tabular-data-json" in raw_output:
         inner = extract_bedrock_json(raw_output)
-        if inner:
-            # Override with the parsed Bedrock values
-            overall_score = inner.get("overall_score", overall_score)
-            keywords = inner.get("keywords", keywords)
-            missing_sections = inner.get("missing_sections", missing_sections)
-            suggestions = inner.get("suggestions", suggestions)
+
+    if inner:
+        # Override with the parsed Bedrock values if present
+        overall_score = inner.get("overall_score", overall_score)
+        keywords = inner.get("keywords", keywords)
+        missing_sections = inner.get("missing_sections", missing_sections)
+        suggestions = inner.get("suggestions", suggestions)
 
     # Ensure types are correct for DynamoDB
     try:
