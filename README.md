@@ -748,3 +748,5 @@ When you are done and want to stop all charges:
   - Using Terraform for both creation and destruction keeps AWS costs controlled and repeatable, which is critical in a learning environment.
 
 This project now represents a full CI/CD pipeline: Markdown → HTML → S3 static website → DynamoDB deployment analytics, all wired together with Terraform and GitHub Actions.
+
+<!-- trigger beta redeploy -->" >> README.md
