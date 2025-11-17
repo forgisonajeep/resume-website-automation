@@ -190,7 +190,7 @@ The `.gitignore` ensures Terraform state, `.terraform/`, and transient files do 
 
 ---
 
-### 🚀 How the CI/CD Pipeline Works (Implementation)
+### How the CI/CD Pipeline Works (Implementation)
 
 Below is the full workflow from **editing the resume** → **beta preview** → **production deployment** → **database logging**.
 
