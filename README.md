@@ -41,8 +41,6 @@ Infrastructure has been torn down to avoid costs — redeploy using Terraform to
 - [Prerequisites](#prerequisites)
 - [AWS + Terraform Setup](#aws--terraform-setup)
 - [How the CI/CD Pipeline Works (Implementation)](#how-the-cicd-pipeline-works-implementation)
-- [Deployment Logging in DynamoDB](#deployment-logging-in-dynamodb)
-- [Manual Seed for Beta ATS Analytics](#manual-seed-for-beta-ats-analytics)
 - [Troubleshooting](#troubleshooting)
 - [Security Hardening](#security-hardening)
 - [Lessons Learned](#lessons-learned)
