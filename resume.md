@@ -87,4 +87,4 @@ Seventy-First High School, Fayetteville, NC — 2007
 - Certified AI Practitioner  – In Progress  
 - HashiCorp Certified: Terraform Associate – In Progress  
  
-- Test AI deployment 🚀
+
